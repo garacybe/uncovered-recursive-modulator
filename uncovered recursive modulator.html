@@ -1,0 +1,1044 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>uncovered recursive modulator</title>
+    <style>
+        :root {
+            --bg-color: #050508;
+            --fg-color: #a0a0a0;
+            --accent-color: #00ffff;
+            --panel-bg: rgba(0, 0, 0, 0.85);
+            --input-bg: rgba(20, 20, 25, 0.9);
+            --input-border: #444;
+            --slider-thumb-size: 8px;
+            --slider-track-height: 1px;
+        }
+        body, html {
+            background-color: var(--bg-color);
+            color: var(--fg-color);
+            font-family: 'Courier New', Courier, monospace;
+            margin: 0;
+            overflow: hidden;
+            height: 100%;
+        }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        canvas:not([data-locked="true"]) { cursor: pointer; }
+        canvas[data-locked="true"] { cursor: none; }
+        
+        #ui-container {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            user-select: none;
+            transition: opacity 0.3s, transform 0.3s;
+            pointer-events: none;
+        }
+        #ui-container.hidden {
+            opacity: 0;
+            transform: translateX(-20px);
+        }
+        #main-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            background: var(--panel-bg);
+            border: 1px solid var(--accent-color);
+            padding: 5px 8px;
+            margin-bottom: 5px;
+            pointer-events: all;
+            width: 450px;
+            box-sizing: border-box;
+        }
+        h1, h2, h3 { font-size: 0.9em; margin: 0; color: var(--accent-color); text-transform: lowercase; }
+        h2 { font-size: 0.75em; margin-bottom: 5px; border-bottom: 1px dotted rgba(160,160,160,0.3); padding-bottom: 3px; }
+        h3 { font-size: 0.7em; margin: 0; color: var(--fg-color); text-transform: uppercase; }
+
+        #ui-grid {
+            display: grid;
+            grid-template-columns: 220px 220px;
+            gap: 10px;
+            pointer-events: all;
+            align-items: start;
+        }
+        .grid-column {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .ui-panel {
+            background: var(--panel-bg);
+            border: 1px solid var(--accent-color);
+            padding: 5px 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        .panel-header {
+            padding-bottom: 3px;
+            border-bottom: 1px solid rgba(0, 255, 255, 0.2);
+        }
+        
+        .buttons { display: flex; flex-direction: column; gap: 4px; }
+        .button-row { display: flex; gap: 4px; }
+        button, select {
+            background: var(--input-bg); border: 1px solid var(--accent-color); color: var(--accent-color);
+            padding: 2px 4px; font-family: inherit; cursor: pointer; font-size: 0.6em;
+            transition: background 0.2s, color 0.2s; flex-grow: 1; text-transform: lowercase;
+        }
+        button:hover, select:hover { background: var(--accent-color); color: var(--bg-color); }
+        button.active, button.collapsed { background: var(--accent-color); color: var(--bg-color); }
+        select { -webkit-appearance: none; -moz-appearance: none; text-align: center; padding: 2px; flex-grow: 1; }
+        select option { background: var(--bg-color); color: var(--fg-color); }
+        select:disabled { opacity: 0.7; color: var(--fg-color); cursor: not-allowed; }
+        
+        .param-section { display: flex; flex-direction: column; gap: 4px; }
+        .control-grid { display: grid; grid-template-columns: 60px 1fr; gap: 4px; align-items: center; cursor: help; }
+        .control-grid label, .control-grid span { font-size: 0.65em; text-transform: capitalize; }
+        
+        .slider-group { display: grid; grid-template-columns: 1fr 35px; align-items: center; gap: 4px; }
+        
+        input[type="text"].param-input {
+            width: 100%; box-sizing: border-box; background: var(--input-bg); color: var(--fg-color);
+            border: 1px solid var(--input-border); font-size: 0.65em; text-align: right; padding: 1px 3px;
+            font-family: inherit;
+        }
+        input[type="range"] {
+            -webkit-appearance: none; width: 100%; height: var(--slider-track-height); background: var(--accent-color);
+            outline: none; opacity: 0.7; transition: opacity .2s; margin: 0; padding: 0;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none; appearance: none; width: var(--slider-thumb-size); height: var(--slider-thumb-size);
+            background: var(--accent-color); cursor: pointer; border: 1px solid var(--bg-color); border-radius: 50%;
+        }
+        
+        .grid-layer-control { border: 1px solid var(--input-border); padding: 5px; margin-top: 5px; display: flex; flex-direction: column; gap: 5px; }
+        .grid-layer-header { display: flex; justify-content: space-between; align-items: center; }
+        .layer-collapse-btn { padding: 1px 5px; font-size: 0.6em; flex-grow: 0; min-width: 60px; }
+        .grid-axis-row { display: grid; grid-template-columns: 15px 1fr 1fr; gap: 5px; align-items: center; }
+        .grid-axis-row label { font-size: 0.7em; text-align: center; }
+        .grid-axis-row .slider-group { grid-template-columns: 1fr 28px; gap: 2px; }
+        .grid-axis-row .param-input { width: 100%; }
+
+        .mod-slot {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            border: 1px solid var(--input-border);
+            padding: 4px;
+            margin-bottom: 5px;
+        }
+        .mod-slot-row { display: grid; gap: 4px; align-items: center; }
+        .mod-slot-row-selects { grid-template-columns: 1fr 1fr 20px; }
+        .mod-slot-row-slider { grid-template-columns: 1fr; }
+        .mod-slot select { font-size: 0.6em; padding: 1px; height: 18px; }
+        .mod-slot .slider-group { grid-template-columns: 1fr 35px; }
+        .mod-slot button { padding: 0; font-size: 1em; flex-grow: 0; width: 20px; height: 18px;}
+   
+        .lfo-visualizer { width: 100%; height: 18px; background: var(--input-bg); border: 1px solid var(--input-border); margin-top: 2px;}
+
+        .bpm-control { display: grid; grid-template-columns: 40px 1fr; gap: 4px; align-items: center; }
+        #tap-tempo-btn { padding: 2px; flex-grow: 0; min-width: 0; }
+        .lfo-sync-row { display: grid; grid-template-columns: 60px 1fr; gap: 4px; align-items: center; margin-bottom: 4px; }
+        .lfo-sync-btn { flex-grow: 0; }
+        [data-disabled="true"] { opacity: 0.5; pointer-events: none; }
+    </style>
+</head>
+<body>
+    <div id="ui-container">
+        <div id="main-header">
+            <h1>hierarchical engine</h1>
+            <span id="ui-toggle-btn">~ to hide</span>
+        </div>
+        <div id="ui-grid">
+            <div class="grid-column" id="col-left">
+                <div class="ui-panel" id="panel-params"></div>
+                <div class="ui-panel" id="panel-grid"></div>
+                <div class="ui-panel" id="panel-system"></div>
+            </div>
+            <div class="grid-column" id="col-right">
+                <div class="ui-panel" id="panel-lfos"></div>
+                <div class="ui-panel" id="panel-modulation"></div>
+            </div>
+        </div>
+    </div>
+    <canvas id="c"></canvas>
+
+    <script id="vs" type="x-shader/x-vertex">
+        attribute vec2 a;
+        void main(){
+            gl_Position = vec4(a, 0.0, 1.0);
+        }
+    </script>
+
+    <script id="fs" type="x-shader/x-fragment">
+        precision highp float;
+        uniform vec2 u_res;
+        uniform float u_time;
+        
+        // Camera
+        uniform vec3 u_cam_pos;
+        uniform vec3 u_cam_fwd;
+        uniform vec3 u_cam_right;
+        uniform vec3 u_cam_up;
+
+        // Base Parameters
+        uniform float u_iterations;
+        uniform float u_scale_coarse;
+        uniform float u_scale_fine;
+        uniform float u_hue;
+        uniform float u_fog;
+        uniform float u_box_fold;
+        uniform float u_min_radius;
+        
+        // System
+        uniform vec3 u_grid_spacing;
+        uniform vec3 u_meta_spacing;
+        uniform vec3 u_mmeta_spacing;
+        uniform vec3 u_grid_rotation;
+        uniform vec3 u_meta_rotation;
+        uniform vec3 u_mmeta_rotation;
+        uniform bvec3 u_layer_collapse;
+        
+        // Modulation
+        struct ModSlot {
+            int source;
+            int dest;
+            float amount;
+        };
+        const int MAX_MOD_SLOTS = 16;
+        uniform ModSlot u_mod_slots[MAX_MOD_SLOTS];
+        uniform int u_num_mod_slots;
+
+        struct LFO {
+            int shape; // 0:sin, 1:tri, 2:saw, 3:sqr
+            float freq;
+            float min_amp;
+            float max_amp;
+        };
+        uniform LFO u_lfos[2];
+
+        const float PI = 3.1415926535;
+
+        // Destination IDs must match JS MOD_DESTINATIONS array
+        const int DEST_ITERATIONS = 0;
+        const int DEST_SCALE_COARSE = 1;
+        const int DEST_SCALE_FINE = 2;
+        const int DEST_HUE = 3;
+        const int DEST_FOG = 4;
+        const int DEST_BOX_FOLD = 5;
+        const int DEST_MIN_RADIUS = 6;
+        const int DEST_LFO0_FREQ = 7;
+        const int DEST_LFO0_MIN = 8;
+        const int DEST_LFO0_MAX = 9;
+        const int DEST_LFO1_FREQ = 10;
+        const int DEST_LFO1_MIN = 11;
+        const int DEST_LFO1_MAX = 12;
+
+        vec3 hsv2rgb(vec3 c) {
+            vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+            vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+            return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+        }
+        
+        mat3 rotationMatrix(vec3 axis, float angle) {
+            axis = normalize(axis); float s = sin(angle); float c = cos(angle); float oc = 1.0 - c;
+            return mat3(oc * axis.x * axis.x + c,           oc * axis.x * axis.y - axis.z * s,  oc * axis.z * axis.x + axis.y * s,
+                        oc * axis.x * axis.y + axis.z * s,  oc * axis.y * axis.y + c,           oc * axis.y * axis.z - axis.x * s,
+                        oc * axis.z * axis.x - axis.y * s,  oc * axis.y * axis.z + axis.x * s,  oc * axis.z * axis.z + c);
+        }
+        vec3 rotate(vec3 p, vec3 angles) {
+            if (angles.x != 0.0) p = rotationMatrix(vec3(1,0,0), angles.x) * p;
+            if (angles.y != 0.0) p = rotationMatrix(vec3(0,1,0), angles.y) * p;
+            if (angles.z != 0.0) p = rotationMatrix(vec3(0,0,1), angles.z) * p;
+            return p;
+        }
+        
+        float getLFO(LFO lfo, float t) {
+            float phase = fract(t * lfo.freq);
+            float wave = 0.0;
+            if(lfo.shape == 0) wave = sin(phase * 2.0 * PI) * 0.5 + 0.5; // Sine
+            else if(lfo.shape == 1) wave = 1.0 - 2.0 * abs(phase - 0.5); // Triangle
+            else if(lfo.shape == 2) wave = phase; // Saw
+            else if(lfo.shape == 3) wave = step(0.5, phase); // Square
+            return mix(lfo.min_amp, lfo.max_amp, wave);
+        }
+
+        struct ModulatedParams {
+            float iterations;
+            float scale_coarse;
+            float scale_fine;
+            float hue;
+            float fog;
+            float box_fold;
+            float min_radius;
+            LFO lfos[2];
+        };
+
+        void calculateModulatedParams(vec3 p, out ModulatedParams m) {
+            // 1. Initialize with base uniform values
+            m.iterations = u_iterations;
+            m.scale_coarse = u_scale_coarse;
+            m.scale_fine = u_scale_fine;
+            m.hue = u_hue;
+            m.fog = u_fog;
+            m.box_fold = u_box_fold;
+            m.min_radius = u_min_radius;
+            m.lfos[0] = u_lfos[0];
+            m.lfos[1] = u_lfos[1];
+
+            // 2. Calculate position-dependent source values
+            vec3 safe_mmeta_spacing = max(u_mmeta_spacing, vec3(0.001));
+            vec3 safe_meta_spacing = max(u_meta_spacing, vec3(0.001));
+            vec3 safe_grid_spacing = max(u_grid_spacing, vec3(0.001));
+            
+            vec3 p_rotated_mmeta = rotate(p, u_mmeta_rotation);
+            vec3 mmeta_norm = sin(p_rotated_mmeta / safe_mmeta_spacing * PI) * 0.5 + 0.5;
+            vec3 p_in_mmeta_for_meta = u_layer_collapse.z ? p_rotated_mmeta : mod(p_rotated_mmeta, safe_mmeta_spacing) - 0.5 * safe_mmeta_spacing;
+            
+            vec3 p_rotated_meta = rotate(p_in_mmeta_for_meta, u_meta_rotation);
+            vec3 meta_norm = sin(p_rotated_meta / safe_meta_spacing * PI) * 0.5 + 0.5;
+            vec3 p_in_meta_for_grid = u_layer_collapse.y ? p_rotated_meta : mod(p_rotated_meta, safe_meta_spacing) - 0.5 * safe_meta_spacing;
+            
+            vec3 p_rotated_grid = rotate(p_in_meta_for_grid, u_grid_rotation);
+            vec3 grid_norm = sin(p_rotated_grid / safe_grid_spacing * PI) * 0.5 + 0.5;
+
+            // 3. Apply modulations, calculating LFO sources on-the-fly for dynamic interaction
+            for (int i = 0; i < MAX_MOD_SLOTS; i++) {
+                if (i >= u_num_mod_slots) break;
+                ModSlot slot = u_mod_slots[i];
+                float source_val = 0.0;
+                
+                // Get source value
+                if(slot.source == 0) source_val = grid_norm.x; else if(slot.source == 1) source_val = grid_norm.y; else if(slot.source == 2) source_val = grid_norm.z;
+                else if(slot.source == 3) source_val = meta_norm.x; else if(slot.source == 4) source_val = meta_norm.y; else if(slot.source == 5) source_val = meta_norm.z;
+                else if(slot.source == 6) source_val = mmeta_norm.x; else if(slot.source == 7) source_val = mmeta_norm.y; else if(slot.source == 8) source_val = mmeta_norm.z;
+                else if(slot.source == 9) source_val = getLFO(m.lfos[0], u_time); 
+                else if(slot.source == 10) source_val = getLFO(m.lfos[1], u_time);
+                else if(slot.source == 11) source_val = fract(u_time * 0.1);
+                
+                float mod_val = slot.amount * source_val;
+                
+                // Apply modulation to destination
+                if(slot.dest == DEST_ITERATIONS) m.iterations += mod_val * 80.0;
+                else if(slot.dest == DEST_SCALE_COARSE) m.scale_coarse += mod_val * 10.0;
+                else if(slot.dest == DEST_SCALE_FINE) m.scale_fine += mod_val * 0.2;
+                else if(slot.dest == DEST_HUE) m.hue += mod_val;
+                else if(slot.dest == DEST_FOG) m.fog += mod_val;
+                else if(slot.dest == DEST_BOX_FOLD) m.box_fold += mod_val * 2.0;
+                else if(slot.dest == DEST_MIN_RADIUS) m.min_radius += mod_val * 2.0;
+                else if(slot.dest == DEST_LFO0_FREQ) m.lfos[0].freq += mod_val * 2.0;
+                else if(slot.dest == DEST_LFO0_MIN) m.lfos[0].min_amp += mod_val;
+                else if(slot.dest == DEST_LFO0_MAX) m.lfos[0].max_amp += mod_val;
+                else if(slot.dest == DEST_LFO1_FREQ) m.lfos[1].freq += mod_val * 2.0;
+                else if(slot.dest == DEST_LFO1_MIN) m.lfos[1].min_amp += mod_val;
+                else if(slot.dest == DEST_LFO1_MAX) m.lfos[1].max_amp += mod_val;
+            }
+        }
+
+
+        vec4 map_fractal(vec3 pos, float p_iterations, float p_scale, float p_box_fold, float p_min_radius) {
+            vec3 z = pos;
+            float dr = 1.0;
+            vec4 trap = vec4(abs(z), dot(z,z));
+            float min_radius_2 = p_min_radius * p_min_radius;
+
+            for (int i = 0; i < 100; i++) {
+                if(float(i) > p_iterations) break;
+                z = clamp(z, -p_box_fold, p_box_fold) * 2.0 - z;
+                float r2 = dot(z, z);
+                if (r2 < min_radius_2) {
+                    float temp = 4.0 / min_radius_2;
+                    z *= temp; dr *= temp;
+                }
+                z = z * p_scale + pos;
+                dr = dr * abs(p_scale) + 1.0;
+                trap = min(trap, vec4(abs(z), dot(z,z)));
+            }
+            float d = length(z) / abs(dr);
+            return vec4(d, trap.y, trap.z, trap.w);
+        }
+        
+        vec4 map_world(vec3 p) {
+            ModulatedParams m;
+            calculateModulatedParams(p, m);
+            
+            vec3 safe_mmeta_spacing = max(u_mmeta_spacing, vec3(0.001));
+            vec3 safe_meta_spacing = max(u_meta_spacing, vec3(0.001));
+            vec3 safe_grid_spacing = max(u_grid_spacing, vec3(0.001));
+
+            vec3 p_final_mmeta = rotate(p, u_mmeta_rotation);
+            vec3 p_in_mmeta = u_layer_collapse.z ? p_final_mmeta : mod(p_final_mmeta, safe_mmeta_spacing) - 0.5 * safe_mmeta_spacing;
+            vec3 p_final_meta = rotate(p_in_mmeta, u_meta_rotation);
+            vec3 p_in_meta = u_layer_collapse.y ? p_final_meta : mod(p_final_meta, safe_meta_spacing) - 0.5 * safe_meta_spacing;
+            vec3 p_final_grid = rotate(p_in_meta, u_grid_rotation);
+            vec3 p_in_grid = u_layer_collapse.x ? p_final_grid : mod(p_final_grid, safe_grid_spacing) - 0.5 * safe_grid_spacing;
+
+            float p_iterations = clamp(m.iterations, 1.0, 100.0);
+            float p_scale = clamp(m.scale_coarse, -5.0, 5.0) + clamp(m.scale_fine, -0.1, 0.1);
+            float p_min_radius = clamp(m.min_radius, 0.001, 4.0);
+            float p_box_fold = clamp(m.box_fold, 0.01, 4.0);
+
+            return map_fractal(p_in_grid, p_iterations, p_scale, p_box_fold, p_min_radius);
+        }
+
+        vec3 getNormal(vec3 p) {
+            vec2 e = vec2(0.001, 0.0);
+            return normalize(vec3(
+                map_world(p + e.xyy).x - map_world(p - e.xyy).x,
+                map_world(p + e.yxy).x - map_world(p - e.yxy).x,
+                map_world(p + e.yyx).x - map_world(p - e.yyx).x
+            ));
+        }
+        
+        void main() {
+            vec3 ro = u_cam_pos;
+            vec2 u = (gl_FragCoord.xy - 0.5 * u_res) / u_res.y;
+            vec3 rd = normalize(u.x * u_cam_right + u.y * u_cam_up + 1.5 * u_cam_fwd);
+
+            float de = 0.0;
+            vec4 res = vec4(0.0);
+            vec3 p = ro;
+            float max_dist = 40000.0;
+            
+            for (int i = 0; i < 120; i++) {
+                p = ro + rd * de;
+                res = map_world(p);
+                float d = res.x;
+                if (d < 0.001 * de || de > max_dist) break;
+                de += d * 0.9;
+            }
+            
+            vec3 bg_col = vec3(0.004, 0.004, 0.006);
+            vec3 col = bg_col;
+
+            if (de < max_dist) {
+                ModulatedParams m;
+                calculateModulatedParams(p, m);
+
+                float p_fog = clamp(m.fog, 0.0, 1.0);
+                vec3 n = getNormal(p);
+                vec3 hsv = vec3(fract(0.65 + 0.3*res.y + m.hue), 0.8, 0.3 + res.z*0.7);
+                vec3 final_col = hsv2rgb(hsv);
+                
+                float ambient = 0.5;
+                float diffuse = max(0.0, dot(n, normalize(vec3(1.0, 1.0, 0.5))));
+                float fresnel = pow(1.0 - max(dot(n, -rd), 0.0), 2.0);
+                final_col = final_col * (ambient + diffuse * 0.5) + fresnel * 0.5;
+
+                col = mix(final_col, bg_col, smoothstep(max_dist * (1.0 - p_fog), max_dist, de));
+            }
+            
+            col = pow(col, vec3(0.4545));
+            gl_FragColor = vec4(col, 1.0);
+        }
+    </script>
+
+    <script>
+    const canvas = document.getElementById('c');
+    const gl = canvas.getContext('webgl', { antialias: false, powerPreference: 'high-performance' });
+    if (!gl) document.body.innerHTML = "this requires webgl.";
+
+    const uiContainer = document.getElementById('ui-container');
+    const uiGrid = document.getElementById('ui-grid');
+    const uiToggleBtn = document.getElementById('ui-toggle-btn');
+    
+    let needsRender = true;
+    const keys = {};
+    const camera = { position: { x: 0, y: 0, z: 2000 }, pitch: 0, yaw: 0 };
+    let appTime = 0, lastTime = 0;
+    let tapTimestamps = [];
+
+
+    const MOD_SOURCES = [
+        'grid-x', 'grid-y', 'grid-z', 
+        'meta-x', 'meta-y', 'meta-z', 
+        'mmeta-x', 'mmeta-y', 'mmeta-z', 
+        'lfo 1', 'lfo 2', 'time'
+    ];
+    const LFO_SHAPES = ['sine', 'triangle', 'saw', 'square'];
+    const BEAT_DIVISIONS = [
+        { name: '4 Bars', value: 1/16 }, { name: '2 Bars', value: 1/8 }, { name: '1 Bar', value: 1/4 },
+        { name: '1/2 Note', value: 1/2 }, { name: '1/4 Note', value: 1 }, { name: '1/8 Note', value: 2 },
+        { name: '1/16 Note', value: 4 }, { name: '1/32 Note', value: 8 },
+        { name: '1/8 Triplet', value: 3 }, { name: '1/16 Triplet', value: 6 }
+    ].map(d => ({...d, name: d.name.replace(' ', '\u00A0')}));
+
+    let MOD_DESTINATIONS = [];
+
+    const DEFAULT_STATE = {
+        params: {
+            iterations:   { val:12 },
+            scale_coarse: { val:2 },
+            scale_fine:   { val:0.1 },
+            hue:          { val:0 },
+            fog:          { val:0.5 },
+            box_fold:     { val:1.0 },
+            min_radius:   { val:0.5 },
+        },
+        system: {
+            grid_spacing:  { x:350, y:350, z:350 },
+            meta_spacing:  { x:1200,y:1200,z:1200 },
+            mmeta_spacing: { x:4000,y:4000,z:4000 },
+            grid_rotation: { x:0, y:0, z:0 },
+            meta_rotation: { x:0, y:0, z:0 },
+            mmeta_rotation:{ x:0, y:0, z:0 },
+            resolution:    { val:1.0 },
+            moveSpeed:     { val:5 },
+            paramSlew:     { val: 1.0 },
+            timeScale:     { val: 1.0 },
+            bpm:           { val: 120 },
+        }
+    };
+
+    let state = {
+        current_preset_index: 0,
+        presets: {},
+        layer_collapse: [false, false, false],
+        lfos: [
+            { shape: 0, freq: 0.1, min_amp: 0, max_amp: 1, sync: false, division: 4 },
+            { shape: 0, freq: 0.1, min_amp: 0, max_amp: 1, sync: false, division: 4 }
+        ],
+        mod_slots: [],
+        params: {
+            iterations:   { name:"iterations",   target:12,  current:12,  min:1,    max:80, default: DEFAULT_STATE.params.iterations.val },
+            scale_coarse: { name:"scale(crs)", target:2,   current:2,   min:-5,   max:5, step: 1, default: DEFAULT_STATE.params.scale_coarse.val },
+            scale_fine:   { name:"scale(fine)",   target:0.1, current:0.1, min:-0.1, max:0.1, default: DEFAULT_STATE.params.scale_fine.val },
+            hue:          { name:"hue",          target:0,   current:0,   min:0,    max:1, default: DEFAULT_STATE.params.hue.val },
+            fog:          { name:"fog",          target:0.5, current:0.5, min:0,    max:1, default: DEFAULT_STATE.params.fog.val },
+            box_fold:     { name:"box fold",     target:1.0, current:1.0, min:0.1,  max:2, default: DEFAULT_STATE.params.box_fold.val },
+            min_radius:   { name:"min radius",   target:0.5, current:0.5, min:0.01, max:2, default: DEFAULT_STATE.params.min_radius.val },
+        },
+        system: {
+            grid_spacing:  { name:"grd space", x:350, y:350, z:350, min:0.1, max:1000, step:1, default: DEFAULT_STATE.system.grid_spacing },
+            meta_spacing:  { name:"meta space",x:1200,y:1200,z:1200,min:0.1, max:5000, step:1, default: DEFAULT_STATE.system.meta_spacing },
+            mmeta_spacing: { name:"mmeta spc", x:4000,y:4000,z:4000,min:0.1, max:20000, step:1, default: DEFAULT_STATE.system.mmeta_spacing },
+            grid_rotation: { name:"grd rotate", x:0, y:0, z:0, min:-3.14, max:3.14, step:0.01, default: DEFAULT_STATE.system.grid_rotation },
+            meta_rotation: { name:"meta rotate",x:0, y:0, z:0, min:-3.14, max:3.14, step:0.01, default: DEFAULT_STATE.system.meta_rotation },
+            mmeta_rotation:{ name:"mmeta rotate",x:0, y:0, z:0, min:-3.14, max:3.14, step:0.01, default: DEFAULT_STATE.system.mmeta_rotation },
+            resolution:    { name:"resolution",val:1.0, min:0.25,max:1.0, default: DEFAULT_STATE.system.resolution.val },
+            moveSpeed:     { name:"speed",     val:5,  min:0.0001,  max:50, default: DEFAULT_STATE.system.moveSpeed.val },
+            paramSlew:     { name:"slew rate", val: 1.0, min: 0.01, max: 1.0, default: DEFAULT_STATE.system.paramSlew.val },
+            timeScale:     { name:"time scale", val: 1.0, min: 0.0, max: 2.0, default: DEFAULT_STATE.system.timeScale.val },
+            bpm:           { name:"bpm",       val:120, min:20,  max:300, step:0.01, default: DEFAULT_STATE.system.bpm.val },
+        }
+    };
+    
+    function buildModDestinations() {
+        MOD_DESTINATIONS = [
+            ...Object.keys(state.params).map(k => ({ name: state.params[k].name.toLowerCase() })),
+            ...state.lfos.flatMap((lfo, i) => [
+                { name: `lfo ${i+1} freq` },
+                { name: `lfo ${i+1} min` },
+                { name: `lfo ${i+1} max` },
+            ])
+        ];
+    }
+    
+    function getSerializableState() {
+        const serializableParams = {};
+        for (const key in state.params) {
+            serializableParams[key] = { ...state.params[key], val: state.params[key].target };
+            delete serializableParams[key].target;
+            delete serializableParams[key].current;
+            delete serializableParams[key].default;
+        }
+
+        const serializableSystem = {};
+        for (const key in state.system) {
+            serializableSystem[key] = { ...state.system[key] };
+             delete serializableSystem[key].default;
+        }
+
+        return {
+            layer_collapse: state.layer_collapse,
+            lfos: state.lfos,
+            mod_slots: state.mod_slots,
+            params: serializableParams,
+            system: serializableSystem
+        };
+    }
+
+    function loadPreset(presetData) {
+        if (typeof presetData === 'string') {
+            try {
+                presetData = JSON.parse(presetData);
+            } catch (e) { console.error("Failed to parse preset", e); return; }
+        }
+        
+        const rehydratedParams = {};
+        for(const key in state.params) {
+            if (presetData.params && presetData.params[key]) {
+                const p = presetData.params[key];
+                rehydratedParams[key] = { ...state.params[key], target: p.val, current: p.val };
+            } else {
+                rehydratedParams[key] = state.params[key];
+            }
+        }
+        
+        const defaultLfo = { shape: 0, freq: 0.1, min_amp: 0, max_amp: 1, sync: false, division: 4 };
+        const loadedLfos = (presetData.lfos || [defaultLfo, defaultLfo]).map(lfo => ({...defaultLfo, ...lfo}));
+
+        Object.assign(state, {
+            layer_collapse: presetData.layer_collapse || [false,false,false],
+            lfos: loadedLfos,
+            mod_slots: presetData.mod_slots || [],
+            params: rehydratedParams,
+            system: { ...state.system, ...presetData.system },
+        });
+
+        generateUI();
+        needsRender = true;
+    }
+    
+    function definePresets() {
+        state.presets = {
+            'default': JSON.stringify(getSerializableState()), // Save initial state as default
+            'qballz': JSON.stringify({
+                layer_collapse: [true, false, true],
+                lfos: [{ shape: 0, freq: 0.1, min_amp: 0, max_amp: 1, sync: false, division: 4 }, { shape: 0, freq: 0.1, min_amp: 0, max_amp: 1, sync: false, division: 4 }],
+                mod_slots: [],
+                params: {
+                    iterations: { val:15.06 }, scale_coarse: { val:1 }, scale_fine: { val:0.01 },
+                    hue: { val:0 }, fog: { val:0 }, box_fold: { val:0.1 }, min_radius: { val:0.01 },
+                },
+                system: {
+                    ...state.system,
+                    mmeta_rotation:{...state.system.mmeta_rotation, y:-0.1}
+                }
+            })
+        };
+    }
+
+    function cyclePreset() {
+        const presetNames = Object.keys(state.presets);
+        if (presetNames.length === 0) return;
+        state.current_preset_index = (state.current_preset_index + 1) % presetNames.length;
+        const presetName = presetNames[state.current_preset_index];
+        loadPreset(state.presets[presetName]);
+        document.getElementById('preset-btn').textContent = `p: ${presetName}`;
+    }
+    function savePreset() {
+        const presetNames = Object.keys(state.presets);
+        if (presetNames.length === 0) return;
+        const presetName = presetNames[state.current_preset_index];
+        state.presets[presetName] = JSON.stringify(getSerializableState());
+        alert(`${presetName} saved!`);
+    }
+    function copySettings() {
+        navigator.clipboard.writeText(JSON.stringify(getSerializableState())).then(() => {
+            alert('Settings copied to clipboard!');
+        }, () => { alert('Failed to copy settings.'); });
+    }
+
+    // --- WebGL Setup ---
+    const vs = document.getElementById('vs').text;
+    const fs = document.getElementById('fs').text;
+    const program = gl.createProgram();
+    const vsShader = createShader(gl.VERTEX_SHADER, vs);
+    const fsShader = createShader(gl.FRAGMENT_SHADER, fs);
+    gl.attachShader(program, vsShader);
+    gl.attachShader(program, fsShader);
+    gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        console.error('Program link error:', gl.getProgramInfoLog(program));
+    }
+    gl.useProgram(program);
+    function createShader(type, source) {
+        const shader = gl.createShader(type); gl.shaderSource(shader, source); gl.compileShader(shader);
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            console.error('Shader error:', gl.getShaderInfoLog(shader)); gl.deleteShader(shader); return null;
+        } return shader;
+    }
+    const uniforms = {};
+    ['res', 'time', 'cam_pos', 'cam_fwd', 'cam_right', 'cam_up', 'grid_rotation', 'meta_rotation', 'mmeta_rotation', 'layer_collapse', 'num_mod_slots', 'grid_spacing', 'meta_spacing', 'mmeta_spacing'].forEach(n=>uniforms[n]=gl.getUniformLocation(program,`u_${n}`));
+    Object.keys(state.params).forEach(p => uniforms[p] = gl.getUniformLocation(program, `u_${p}`));
+    for(let i=0;i<16;i++) uniforms[`mod_slots[${i}]`]={source:gl.getUniformLocation(program,`u_mod_slots[${i}].source`),dest:gl.getUniformLocation(program,`u_mod_slots[${i}].dest`),amount:gl.getUniformLocation(program,`u_mod_slots[${i}].amount`)};
+    for(let i=0;i<2;i++) uniforms[`lfos[${i}]`]={shape:gl.getUniformLocation(program,`u_lfos[${i}].shape`),freq:gl.getUniformLocation(program,`u_lfos[${i}].freq`),min_amp:gl.getUniformLocation(program,`u_lfos[${i}].min_amp`),max_amp:gl.getUniformLocation(program,`u_lfos[${i}].max_amp`)};
+
+    const vertexBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+    const posAttrib = gl.getAttribLocation(program, 'a');
+    gl.enableVertexAttribArray(posAttrib);
+    gl.vertexAttribPointer(posAttrib, 2, gl.FLOAT, false, 0, 0);
+
+    // --- UI Generation ---
+    function generateUI() {
+        const createSelect=(o,s,i,d={})=>{let a='';for(const k in d){if(k!=='disabled')a+=`data-${k}="${d[k]}" `}const dis=d.disabled?'disabled':'';return`<select id="${i}" ${a} ${dis}>${o.map((p,v)=>`<option value="${v}" ${v===s?'selected':''}>${typeof p==='object'?p.name:p}</option>`).join('')}</select>`};
+        const createSlider=(id,{val,min,max,step,defaultVal})=>`<div class="slider-group" title="${id} | dbl-click to reset" data-default-value="${defaultVal}"><input type="range" id="${id}" min="${min}" max="${max}" step="${step||(max-min)/2000}" value="${val}"><input type="text" class="param-input" value="${Number(val).toFixed(4)}"></div>`;
+        const createModSlot=(s,i)=>`<div class="mod-slot" data-index="${i}"><div class="mod-slot-row mod-slot-row-selects">${createSelect(MOD_SOURCES,s.source,`mod-source-${i}`,{prop:'source'})}${createSelect(MOD_DESTINATIONS,s.dest,`mod-dest-${i}`,{prop:'dest'})}<button class="remove-mod-slot" data-index="${i}">-</button></div><div class="mod-slot-row mod-slot-row-slider">${createSlider(`mod-amount-${i}`,{val:s.amount,min:-1,max:1,step:0.01,defaultVal:0})}</div></div>`;
+        
+        const paramsContent = `
+            <div class="panel-header"><h2>parameters</h2></div>
+            <div class="param-section">${Object.entries(state.params).map(([k,p])=>`<div class="control-grid"><label>${p.name}</label>${createSlider(`p-${k}`,{val:p.target,min:p.min,max:p.max,step:p.step,defaultVal:p.default})}</div>`).join('')}</div>
+        `;
+        
+        const presetNames = Object.keys(state.presets);
+        const currentPresetName = presetNames[state.current_preset_index] || 'none';
+        const systemContent = `
+            <div class="panel-header"><h2>system & presets</h2></div>
+            <h2>general</h2>
+            <div class="control-grid">
+                <label>${state.system.bpm.name}</label>
+                <div class="bpm-control">
+                    <button id="tap-tempo-btn">TAP</button>
+                    ${createSlider(`s-bpm`,{...state.system.bpm, val: state.system.bpm.val, defaultVal: state.system.bpm.default})}
+                </div>
+            </div>
+            ${['resolution','moveSpeed','paramSlew', 'timeScale'].map(k=>`<div class="control-grid"><label>${state.system[k].name}</label>${createSlider(`s-${k}`,{...state.system[k], defaultVal: state.system[k].default})}</div>`).join('')}
+            <h2>presets</h2><div class="buttons"><div class="button-row"><button id="preset-btn">p: ${currentPresetName}</button><button id="save-preset-btn">save</button></div><button id="copy-settings-btn">copy settings</button></div>
+        `;
+
+        let gridContent = `<div class="panel-header"><h2>hierarchical grid</h2></div>`;
+        gridContent += `<p style="font-size:0.6em; margin:0 0 4px;">per-axis spacing | rotation</p>`;
+        ['grid', 'meta', 'mmeta'].forEach((layer, layerIndex) => {
+            const layerName = layer === 'mmeta' ? 'meta-meta' : layer;
+            const spacingKey = `${layer}_spacing`;
+            const rotationKey = `${layer}_rotation`;
+            gridContent += `<div class="grid-layer-control"><div class="grid-layer-header"><h3>${layerName}</h3><button class="layer-collapse-btn ${state.layer_collapse[layerIndex] ? 'collapsed' : ''}" data-layer="${layerIndex}">collapse</button></div>`;
+            ['x', 'y', 'z'].forEach(axis => {
+                const spacingParams = { val: state.system[spacingKey][axis], min: state.system[spacingKey].min, max: state.system[spacingKey].max, step: state.system[spacingKey].step, defaultVal: state.system[spacingKey].default[axis] };
+                const rotationParams = { val: state.system[rotationKey][axis], min: state.system[rotationKey].min, max: state.system[rotationKey].max, step: state.system[rotationKey].step, defaultVal: state.system[rotationKey].default[axis] };
+                gridContent += `<div class="grid-axis-row"><label>${axis.toUpperCase()}</label><div class="control-grid">${createSlider(`s-${spacingKey}-${axis}`, spacingParams)}</div><div class="control-grid">${createSlider(`s-${rotationKey}-${axis}`, rotationParams)}</div></div>`;
+            });
+            gridContent += `</div>`;
+        });
+        
+        const lfosContent = `
+             <div class="panel-header"><h2>lfos</h2></div>
+             ${state.lfos.map((lfo,i)=>`<h2>lfo ${i+1}</h2><div class="param-section" data-lfo-index="${i}">
+                <div class="control-grid">
+                    <span>shape</span>
+                    ${createSelect(LFO_SHAPES,lfo.shape,`lfo-shape-${i}`)}
+                </div>
+                <canvas class="lfo-visualizer" id="lfo-canvas-${i}" width="100" height="20"></canvas>
+                <div class="lfo-sync-row">
+                    <button class="lfo-sync-btn ${lfo.sync ? 'active' : ''}" data-lfo-index="${i}">sync</button>
+                    ${createSelect(BEAT_DIVISIONS, lfo.division, `lfo-division-${i}`, { disabled: !lfo.sync })}
+                </div>
+                <div class="control-grid" data-disabled="${lfo.sync}">
+                    <label>freq</label>
+                    ${createSlider(`lfo-${i}-freq`,{val:lfo.freq,min:0.01,max:10,defaultVal:0.1})}
+                </div>
+                ${['min_amp','max_amp'].map(k=>`<div class="control-grid"><label>${k.replace('_',' ')}</label>${createSlider(`lfo-${i}-${k}`,{val:lfo[k],min:-1,max:1,defaultVal:k==='min_amp'?0:1})}</div>`).join('')}
+             </div>`).join('')}
+        `;
+        const modulationContent = `
+            <div class="panel-header"><h2>modulation matrix</h2></div>
+            <div class="param-section" id="mod-slots-container">${state.mod_slots.map(createModSlot).join('')}</div>
+            <button id="add-mod-slot">+ add mod slot</button>
+        `;
+
+        document.getElementById('panel-params').innerHTML = paramsContent;
+        document.getElementById('panel-grid').innerHTML = gridContent;
+        document.getElementById('panel-system').innerHTML = systemContent;
+        document.getElementById('panel-lfos').innerHTML = lfosContent;
+        document.getElementById('panel-modulation').innerHTML = modulationContent;
+        
+        drawLFOVisualizers(appTime / 1000);
+    }
+
+    function tapTempo() {
+        const now = performance.now();
+        const lastTap = tapTimestamps[tapTimestamps.length - 1];
+        if (lastTap && (now - lastTap > 2000)) {
+            tapTimestamps = [];
+        }
+        tapTimestamps.push(now);
+        if (tapTimestamps.length > 4) {
+            tapTimestamps.shift();
+        }
+        if (tapTimestamps.length < 2) return;
+        const intervals = [];
+        for (let i = 1; i < tapTimestamps.length; i++) {
+            intervals.push(tapTimestamps[i] - tapTimestamps[i-1]);
+        }
+        const averageInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+        if (averageInterval > 0) {
+            const newBpm = 60000 / averageInterval;
+            const bpmParam = state.system.bpm;
+            bpmParam.val = Math.max(bpmParam.min, Math.min(bpmParam.max, newBpm));
+
+            const bpmSlider = document.getElementById('s-bpm');
+            if (bpmSlider) {
+                bpmSlider.value = bpmParam.val;
+                const textInput = bpmSlider.nextElementSibling;
+                if (textInput) textInput.value = bpmParam.val.toFixed(2);
+            }
+            needsRender = true;
+        }
+    }
+    
+    function drawLFOVisualizers(time) {
+        const BPS = state.system.bpm.val / 60.0;
+        state.lfos.forEach((lfo, i)=>{
+            const c=document.getElementById(`lfo-canvas-${i}`); if(!c)return; const ctx=c.getContext('2d');
+            const w=c.width,h=c.height; ctx.clearRect(0,0,w,h); 
+            
+            let finalFreq = lfo.freq;
+            if (lfo.sync) {
+                const division = BEAT_DIVISIONS[lfo.division];
+                if(division) finalFreq = BPS * division.value;
+            }
+
+            const freqRatio = Math.min(1.0, finalFreq / 10.0);
+            const hue = 240 - (freqRatio * 240);
+            ctx.strokeStyle=`hsl(${hue}, 100%, 60%)`;
+            
+            ctx.lineWidth=1.5;
+            ctx.beginPath();
+            const step = (p) => p < 0.5 ? 0 : 1;
+
+            for(let x=0;x<w;x++){
+                const p=x/w; 
+                const phase = p + time * finalFreq;
+                let v=0;
+                if(lfo.shape==0)v=Math.sin(phase*2*Math.PI)*.5+.5; 
+                else if(lfo.shape==1)v=1-2*Math.abs(fract(phase)-.5); 
+                else if(lfo.shape==2)v=fract(phase); 
+                else if(lfo.shape==3)v=step(fract(phase));
+
+                let y = h - ((v * (lfo.max_amp - lfo.min_amp) + lfo.min_amp) * (h - 4) + 2);
+                if(x===0)ctx.moveTo(x,y); else ctx.lineTo(x,y);
+            }
+            ctx.stroke();
+        });
+    }
+    const fract = (n) => n - Math.floor(n);
+
+    // --- Main Loop & Interaction ---
+    function updateCamera(){if(document.pointerLockElement!==canvas)return;const s=state.system.moveSpeed.val;const f={x:Math.sin(camera.yaw)*Math.cos(camera.pitch),y:Math.sin(camera.pitch),z:-Math.cos(camera.yaw)*Math.cos(camera.pitch)};const r={x:Math.cos(camera.yaw),y:0,z:Math.sin(camera.yaw)};let m=!1;if(keys['w']){camera.position.x+=f.x*s;camera.position.y+=f.y*s;camera.position.z+=f.z*s;m=!0}if(keys['s']){camera.position.x-=f.x*s;camera.position.y-=f.y*s;camera.position.z-=f.z*s;m=!0}if(keys['d']){camera.position.x+=r.x*s;camera.position.z+=r.z*s;m=!0}if(keys['a']){camera.position.x-=r.x*s;camera.position.z-=r.z*s;m=!0}if(keys[' ']){camera.position.y+=s;m=!0}if(keys['shift']){camera.position.y-=s;m=!0}if(m)needsRender=!0};
+    function mix(a,b,t){return a*(1-t)+b*t};
+    
+    function animate(tm) {
+        requestAnimationFrame(animate);
+
+        // Scaled time
+        if (lastTime === 0) lastTime = tm;
+        const deltaTime = tm - lastTime;
+        lastTime = tm;
+        appTime += deltaTime * state.system.timeScale.val;
+
+        updateCamera();
+
+        // Parameter slewing
+        const slewRate = state.system.paramSlew.val;
+        if (slewRate < 1) {
+            for (const k in state.params) {
+                const p = state.params[k];
+                if (Math.abs(p.current - p.target) > 0.0001) {
+                    p.current = mix(p.current, p.target, slewRate);
+                    needsRender = true;
+                } else p.current = p.target;
+            }
+        } else {
+            for (const k in state.params) state.params[k].current = state.params[k].target;
+        }
+
+        // Check if render is needed
+        const hasTimeModulation = state.mod_slots.some(s => s.source === 11) || state.lfos.some(l => l.freq > 0 || l.sync);
+        if (hasTimeModulation) {
+            needsRender = true;
+            drawLFOVisualizers(appTime / 1000);
+        }
+
+        if (!needsRender) return;
+        needsRender = false;
+
+        // --- Render ---
+        const res = state.system.resolution.val;
+        const w = Math.round(gl.canvas.clientWidth * res);
+        const h = Math.round(gl.canvas.clientHeight * res);
+        if (canvas.width !== w || canvas.height !== h) {
+            canvas.width = w;
+            canvas.height = h;
+        }
+        gl.viewport(0, 0, w, h);
+        gl.uniform2f(uniforms.res, w, h);
+        gl.uniform1f(uniforms.time, appTime / 1000);
+
+        // Camera uniforms
+        const f = {x:Math.sin(camera.yaw)*Math.cos(camera.pitch), y:Math.sin(camera.pitch), z:-Math.cos(camera.yaw)*Math.cos(camera.pitch)};
+        const r = {x:Math.cos(camera.yaw), y:0, z:Math.sin(camera.yaw)};
+        const u = {x:r.y*f.z - r.z*f.y, y:r.z*f.x - r.x*f.z, z:r.x*f.y - r.y*f.x};
+        gl.uniform3f(uniforms.cam_pos, camera.position.x, camera.position.y, camera.position.z);
+        gl.uniform3f(uniforms.cam_fwd, f.x, f.y, f.z);
+        gl.uniform3f(uniforms.cam_right, r.x, r.y, r.z);
+        gl.uniform3f(uniforms.cam_up, u.x, u.y, u.z);
+
+        // Parameter uniforms
+        Object.entries(state.params).forEach(([k, p]) => { if (uniforms[k]) gl.uniform1f(uniforms[k], p.current) });
+
+        // System uniforms
+        gl.uniform3f(uniforms.grid_spacing, state.system.grid_spacing.x, state.system.grid_spacing.y, state.system.grid_spacing.z);
+        gl.uniform3f(uniforms.meta_spacing, state.system.meta_spacing.x, state.system.meta_spacing.y, state.system.meta_spacing.z);
+        gl.uniform3f(uniforms.mmeta_spacing, state.system.mmeta_spacing.x, state.system.mmeta_spacing.y, state.system.mmeta_spacing.z);
+        gl.uniform3f(uniforms.grid_rotation, state.system.grid_rotation.x, state.system.grid_rotation.y, state.system.grid_rotation.z);
+        gl.uniform3f(uniforms.meta_rotation, state.system.meta_rotation.x, state.system.meta_rotation.y, state.system.meta_rotation.z);
+        gl.uniform3f(uniforms.mmeta_rotation, state.system.mmeta_rotation.x, state.system.mmeta_rotation.y, state.system.mmeta_rotation.z);
+        gl.uniform3i(uniforms.layer_collapse, state.layer_collapse[0], state.layer_collapse[1], state.layer_collapse[2]);
+
+        // Modulation uniforms
+        gl.uniform1i(uniforms.num_mod_slots, state.mod_slots.length);
+        state.mod_slots.forEach((s, i) => {
+            if (uniforms[`mod_slots[${i}]`]) {
+                gl.uniform1i(uniforms[`mod_slots[${i}]`].source, s.source);
+                gl.uniform1i(uniforms[`mod_slots[${i}]`].dest, s.dest);
+                gl.uniform1f(uniforms[`mod_slots[${i}]`].amount, s.amount);
+            }
+        });
+        
+        const BPS = state.system.bpm.val / 60.0;
+        state.lfos.forEach((l, i) => {
+            if (uniforms[`lfos[${i}]`]) {
+                let finalFreq = l.freq;
+                if (l.sync) {
+                    const division = BEAT_DIVISIONS[l.division];
+                    if(division) finalFreq = BPS * division.value;
+                }
+                gl.uniform1i(uniforms[`lfos[${i}]`].shape, l.shape);
+                gl.uniform1f(uniforms[`lfos[${i}]`].freq, finalFreq);
+                gl.uniform1f(uniforms[`lfos[${i}]`].min_amp, l.min_amp);
+                gl.uniform1f(uniforms[`lfos[${i}]`].max_amp, l.max_amp);
+            }
+        });
+
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    };
+
+    
+    // --- Event Listeners ---
+    function handleValueUpdate(target, value) {
+        const val = value;
+        
+        const textInputToUpdate = target.nextElementSibling;
+        const rangeInputToUpdate = target.previousElementSibling;
+
+        if (target.type === 'range') {
+            if (textInputToUpdate && textInputToUpdate.type === 'text') textInputToUpdate.value = val.toFixed(4);
+        } else if (target.type === 'text') {
+            if (rangeInputToUpdate && rangeInputToUpdate.type === 'range') rangeInputToUpdate.value = val;
+        }
+
+        const rangeInput = target.closest('.slider-group').querySelector('input[type=range]');
+        if (!rangeInput || !rangeInput.id) return;
+        const id = rangeInput.id;
+        
+        const parts = id.split('-');
+        const type = parts[0];
+
+        if (type === 'p') {
+            const param = parts[1];
+            state.params[param].target = val;
+        } else if (type === 's') {
+            const param = parts[1];
+            const axis = parts[2];
+            if (axis) state.system[param][axis] = val;
+            else state.system[param].val = val;
+        } else if (type === 'lfo') {
+            const lfoIndex = parseInt(parts[1]);
+            const param = parts[2];
+            if (param === 'freq') state.lfos[lfoIndex].freq = val;
+            else if (param === 'min_amp') state.lfos[lfoIndex].min_amp = val;
+            else if (param === 'max_amp') state.lfos[lfoIndex].max_amp = val;
+            drawLFOVisualizers(appTime / 1000);
+        } else if (type === 'mod' && parts[1] === 'amount') {
+             const index = parseInt(parts[2]);
+             if (state.mod_slots[index]) {
+                state.mod_slots[index].amount = val;
+             }
+        }
+
+        needsRender = true;
+    }
+
+    document.addEventListener('input', e => { 
+        if (e.target.type === 'range') handleValueUpdate(e.target, parseFloat(e.target.value)); 
+    });
+    
+    document.addEventListener('change', e => {
+        if (e.target.type === 'text' && e.target.classList.contains('param-input')) {
+            let val = parseFloat(e.target.value);
+            if(isNaN(val)) return;
+            const rangeInput = e.target.closest('.slider-group').querySelector('input[type=range]');
+            if(rangeInput) rangeInput.value = val;
+            handleValueUpdate(rangeInput, val);
+        }
+        if (e.target.tagName === 'SELECT') {
+            const slot = e.target.closest('.mod-slot');
+            const lfo = e.target.closest('[data-lfo-index]');
+            if (slot) {
+                const index = parseInt(slot.dataset.index);
+                const prop = e.target.dataset.prop;
+                if (state.mod_slots[index]) {
+                  state.mod_slots[index][prop] = parseInt(e.target.value);
+                }
+            } else if (lfo) {
+                const index = parseInt(lfo.dataset.lfoIndex);
+                if (state.lfos[index]) {
+                    if (e.target.id.startsWith('lfo-shape')) {
+                        state.lfos[index].shape = parseInt(e.target.value);
+                    } else if (e.target.id.startsWith('lfo-division')) {
+                        state.lfos[index].division = parseInt(e.target.value);
+                    }
+                    drawLFOVisualizers(appTime / 1000);
+                }
+            }
+            needsRender = true;
+        }
+    });
+
+    document.addEventListener('dblclick', e => {
+        const sliderGroup = e.target.closest('.slider-group');
+        if (!sliderGroup || sliderGroup.dataset.defaultValue === undefined) return;
+
+        const defaultValue = parseFloat(sliderGroup.dataset.defaultValue);
+        if(isNaN(defaultValue)) return;
+        
+        const rangeInput = sliderGroup.querySelector('input[type=range]');
+        const textInput = sliderGroup.querySelector('input[type=text]');
+        
+        if(rangeInput) rangeInput.value = defaultValue;
+        if(textInput) textInput.value = defaultValue.toFixed(4);
+
+        if(rangeInput) handleValueUpdate(rangeInput, defaultValue);
+    });
+
+    document.addEventListener('click', e => {
+        const t = e.target;
+        if (t.classList.contains('layer-collapse-btn')) { const i=parseInt(t.dataset.layer); state.layer_collapse[i]=!state.layer_collapse[i]; needsRender=!0; t.classList.toggle('collapsed'); }
+        else if (t.id === 'add-mod-slot') { if (state.mod_slots.length < 16) { state.mod_slots.push({ source: 0, dest: 0, amount: 0.0 }); generateUI(); needsRender=!0; } }
+        else if (t.classList.contains('remove-mod-slot')) { const i=parseInt(t.dataset.index); state.mod_slots.splice(i, 1); generateUI(); needsRender=!0; }
+        else if (t.id === 'preset-btn') cyclePreset();
+        else if (t.id === 'save-preset-btn') savePreset();
+        else if (t.id === 'copy-settings-btn') copySettings();
+        else if (t.id === 'tap-tempo-btn') tapTempo();
+        else if (t.classList.contains('lfo-sync-btn')) {
+            const lfoIndex = parseInt(t.dataset.lfoIndex);
+            if (state.lfos[lfoIndex]) {
+                state.lfos[lfoIndex].sync = !state.lfos[lfoIndex].sync;
+                generateUI(); 
+                needsRender = true;
+            }
+        }
+    });
+    
+    window.addEventListener('keydown', e=>{if(!keys[e.key.toLowerCase()])needsRender=!0;keys[e.key.toLowerCase()]=!0;if(e.key==='`'||e.key==='~')uiContainer.classList.toggle('hidden')});
+    window.addEventListener('keyup', e=>{keys[e.key.toLowerCase()]=!1});
+    canvas.addEventListener('mousedown',e=>{if(e.button===0)canvas.requestPointerLock()});
+    window.addEventListener('mousedown', e => { if (e.button === 1) { e.preventDefault(); uiContainer.classList.toggle('hidden'); if(document.pointerLockElement) document.exitPointerLock(); } });
+    window.addEventListener('mousemove',e=>{if(document.pointerLockElement===canvas){camera.yaw+=e.movementX*.002;camera.pitch=Math.max(-1.57,Math.min(1.57,camera.pitch-e.movementY*.002));needsRender=!0}});
+    document.addEventListener('pointerlockchange', ()=>{canvas.dataset.locked=!!document.pointerLockElement;if(!document.pointerLockElement)Object.keys(keys).forEach(k=>keys[k]=!1)});
+    document.addEventListener('paste',e=>{let d=(e.clipboardData||window.clipboardData).getData('text');try{const p=JSON.parse(d);if(p.params&&p.system){loadPreset(p);alert('Preset loaded!')}}catch(err){}});
+
+    // --- Init ---
+    buildModDestinations();
+    definePresets();
+    loadPreset(state.presets['qballz']);
+    animate(0);
+    </script>
+</body>
+</html>
